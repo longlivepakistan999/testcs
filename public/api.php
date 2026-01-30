@@ -83,13 +83,13 @@ try {
             $result = ['results' => $detector->processQueue($limit)];
             break;
 
-        // 获取旁站列表（带实时IP检测，支持分页）
+        // 获取旁站列表（支持分页，从数据库读取）
         case 'side_sites':
             if ($method !== 'GET') {
                 throw new Exception('Method not allowed', 405);
             }
             $domainId = (int) ($_GET['id'] ?? 0);
-            $checkIp = ($_GET['check_ip'] ?? '1') === '1';
+            $refresh = ($_GET['refresh'] ?? '0') === '1'; // 是否刷新IP
             $page = (int) ($_GET['page'] ?? 1);
             $perPage = (int) ($_GET['per_page'] ?? 100);
 
@@ -97,7 +97,23 @@ try {
                 throw new Exception('无效的域名ID', 400);
             }
 
-            $result = ['data' => $detector->getSideSitesWithIpCheck($domainId, $checkIp, $page, $perPage)];
+            $result = ['data' => $detector->getSideSitesWithIpCheck($domainId, $refresh, $page, $perPage)];
+            break;
+
+        // 刷新旁站IP（重新检测并更新数据库）
+        case 'refresh_ip':
+            if ($method !== 'POST') {
+                throw new Exception('Method not allowed', 405);
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $domainId = (int) ($input['id'] ?? 0);
+
+            if ($domainId <= 0) {
+                throw new Exception('无效的域名ID', 400);
+            }
+
+            $count = $detector->refreshSideSitesIp($domainId);
+            $result = ['success' => true, 'count' => $count, 'message' => "已刷新 {$count} 个旁站的IP"];
             break;
 
         // 获取统计数据

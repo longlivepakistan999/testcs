@@ -208,16 +208,16 @@
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
-            loadData(1, true);
+            loadData(1);
         });
 
-        // 加载数据
-        async function loadData(page = 1, checkIp = true) {
+        // 加载数据（从数据库读取，不再实时检测IP）
+        async function loadData(page = 1) {
             currentPage = page;
             document.getElementById('siteList').innerHTML = '<tr><td colspan="6" class="loading">加载中...</td></tr>';
 
             try {
-                const response = await fetch(`${API_URL}?action=side_sites&id=${domainId}&check_ip=${checkIp ? '1' : '0'}&page=${page}&per_page=${PER_PAGE}`);
+                const response = await fetch(`${API_URL}?action=side_sites&id=${domainId}&page=${page}&per_page=${PER_PAGE}`);
                 const result = await response.json();
 
                 if (result.code === 0) {
@@ -225,7 +225,7 @@
                     totalPages = data.total_pages || 1;
                     totalCount = data.total || 0;
                     renderDomainInfo(data.domain);
-                    renderSiteList(data.sites, data.original_ip, page);
+                    renderSiteList(data.sites, data.original_ip, page, data.match_count, data.mismatch_count);
                     renderPagination();
                 } else {
                     alert('加载失败: ' + (result.message || '未知错误'));
@@ -325,29 +325,29 @@
             }
 
             let html = '';
-            html += `<button onclick="loadData(1, true)" ${currentPage === 1 ? 'disabled' : ''}>首页</button>`;
-            html += `<button onclick="loadData(${currentPage - 1}, true)" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>`;
+            html += `<button onclick="loadData(1)" ${currentPage === 1 ? 'disabled' : ''}>首页</button>`;
+            html += `<button onclick="loadData(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>`;
 
             // 页码按钮
             const startPage = Math.max(1, currentPage - 2);
             const endPage = Math.min(totalPages, currentPage + 2);
 
             if (startPage > 1) {
-                html += `<button onclick="loadData(1, true)">1</button>`;
+                html += `<button onclick="loadData(1)">1</button>`;
                 if (startPage > 2) html += `<span style="padding: 8px;">...</span>`;
             }
 
             for (let i = startPage; i <= endPage; i++) {
-                html += `<button onclick="loadData(${i}, true)" class="${i === currentPage ? 'active' : ''}">${i}</button>`;
+                html += `<button onclick="loadData(${i})" class="${i === currentPage ? 'active' : ''}">${i}</button>`;
             }
 
             if (endPage < totalPages) {
                 if (endPage < totalPages - 1) html += `<span style="padding: 8px;">...</span>`;
-                html += `<button onclick="loadData(${totalPages}, true)">${totalPages}</button>`;
+                html += `<button onclick="loadData(${totalPages})">${totalPages}</button>`;
             }
 
-            html += `<button onclick="loadData(${currentPage + 1}, true)" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>`;
-            html += `<button onclick="loadData(${totalPages}, true)" ${currentPage === totalPages ? 'disabled' : ''}>末页</button>`;
+            html += `<button onclick="loadData(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>`;
+            html += `<button onclick="loadData(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}>末页</button>`;
 
             html += `<span class="page-info" style="margin-left: 20px;">共 ${totalCount} 条，${totalPages} 页</span>`;
 
@@ -366,9 +366,37 @@
             window.open(`${API_URL}?action=export_single&id=${domainId}&format=json&ip_filter=${filter}`, '_blank');
         }
 
-        // 刷新IP检测
-        function refreshIp() {
-            loadData(currentPage, true);
+        // 刷新IP检测（重新检测所有旁站的当前IP并更新数据库）
+        async function refreshIp() {
+            if (!confirm('确定要重新检测所有旁站的IP吗？这可能需要一些时间。')) {
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = '检测中...';
+
+            try {
+                const response = await fetch(`${API_URL}?action=refresh_ip`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: parseInt(domainId) })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    alert(result.data.message || '刷新完成');
+                    loadData(currentPage);
+                } else {
+                    alert('刷新失败: ' + (result.message || '未知错误'));
+                }
+            } catch (e) {
+                alert('刷新失败: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '刷新IP检测';
+            }
         }
 
         // HTML转义

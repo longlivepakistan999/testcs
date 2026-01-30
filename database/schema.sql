@@ -29,15 +29,25 @@ CREATE TABLE IF NOT EXISTS `domains` (
 CREATE TABLE IF NOT EXISTS `side_sites` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `domain_id` INT UNSIGNED NOT NULL COMMENT '关联的域名ID',
-    `ip_address` VARCHAR(45) NOT NULL COMMENT 'IP地址',
+    `ip_address` VARCHAR(45) NOT NULL COMMENT '原始IP地址(主域名IP)',
     `side_domain` VARCHAR(255) NOT NULL COMMENT '旁站域名',
+    `current_ip` VARCHAR(45) DEFAULT NULL COMMENT '旁站当前IP',
+    `ip_match` TINYINT(1) DEFAULT NULL COMMENT 'IP是否一致: 0-否, 1-是, NULL-未检测',
     `last_resolved` DATE DEFAULT NULL COMMENT '最后解析日期(来自ViewDNS)',
+    `ip_checked_at` TIMESTAMP NULL DEFAULT NULL COMMENT 'IP检测时间',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     KEY `idx_domain_id` (`domain_id`),
     KEY `idx_ip_address` (`ip_address`),
     KEY `idx_side_domain` (`side_domain`),
+    KEY `idx_ip_match` (`ip_match`),
     CONSTRAINT `fk_side_sites_domain` FOREIGN KEY (`domain_id`) REFERENCES `domains` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='旁站表';
+
+-- 升级SQL（如果表已存在，添加新字段）
+-- ALTER TABLE side_sites ADD COLUMN current_ip VARCHAR(45) DEFAULT NULL COMMENT '旁站当前IP' AFTER side_domain;
+-- ALTER TABLE side_sites ADD COLUMN ip_match TINYINT(1) DEFAULT NULL COMMENT 'IP是否一致' AFTER current_ip;
+-- ALTER TABLE side_sites ADD COLUMN ip_checked_at TIMESTAMP NULL DEFAULT NULL COMMENT 'IP检测时间' AFTER last_resolved;
+-- ALTER TABLE side_sites ADD INDEX idx_ip_match (ip_match);
 
 -- Cloudflare IP缓存表
 CREATE TABLE IF NOT EXISTS `cloudflare_ips` (

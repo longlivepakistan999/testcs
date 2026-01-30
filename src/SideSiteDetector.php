@@ -313,7 +313,7 @@ class SideSiteDetector
     }
 
     /**
-     * 保存旁站数据
+     * 保存旁站数据（同时检测并保存当前IP）
      */
     private function saveSideSites(int $domainId, string $ip, array $sideSites): void
     {
@@ -321,15 +321,21 @@ class SideSiteDetector
         $stmt = $this->db->prepare('DELETE FROM side_sites WHERE domain_id = ?');
         $stmt->execute([$domainId]);
 
-        // 插入新数据
+        // 插入新数据（包含当前IP检测）
         $stmt = $this->db->prepare(
-            'INSERT INTO side_sites (domain_id, ip_address, side_domain, last_resolved) VALUES (?, ?, ?, ?)'
+            'INSERT INTO side_sites (domain_id, ip_address, side_domain, current_ip, ip_match, last_resolved, ip_checked_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())'
         );
 
         foreach ($sideSites as $site) {
             $sideDomain = $site['name'] ?? $site;
             $lastResolved = $site['last_resolved'] ?? null;
-            $stmt->execute([$domainId, $ip, $sideDomain, $lastResolved]);
+
+            // 检测旁站当前IP
+            $currentIp = $this->resolveIP($sideDomain, true);
+            $ipMatch = ($currentIp !== null && $currentIp === $ip) ? 1 : 0;
+
+            $stmt->execute([$domainId, $ip, $sideDomain, $currentIp, $ipMatch, $lastResolved]);
         }
     }
 
@@ -474,9 +480,10 @@ class SideSiteDetector
     }
 
     /**
-     * 获取旁站列表并检测当前IP（支持分页）
+     * 获取旁站列表（支持分页，直接从数据库读取）
+     * @param bool $refresh 是否刷新IP（重新检测并更新数据库）
      */
-    public function getSideSitesWithIpCheck(int $domainId, bool $checkIp = true, int $page = 1, int $perPage = 100): array
+    public function getSideSitesWithIpCheck(int $domainId, bool $refresh = false, int $page = 1, int $perPage = 100): array
     {
         // 获取域名信息
         $stmt = $this->db->prepare('SELECT * FROM domains WHERE id = ?');
@@ -489,6 +496,11 @@ class SideSiteDetector
 
         $originalIp = $domainInfo['ip_address'];
 
+        // 如果需要刷新IP，先更新数据库
+        if ($refresh) {
+            $this->refreshSideSitesIp($domainId, $originalIp, $page, $perPage);
+        }
+
         // 获取总数
         $stmt = $this->db->prepare('SELECT COUNT(*) FROM side_sites WHERE domain_id = ?');
         $stmt->execute([$domainId]);
@@ -497,25 +509,27 @@ class SideSiteDetector
         $totalPages = $total > 0 ? ceil($total / $perPage) : 0;
         $offset = ($page - 1) * $perPage;
 
-        // 获取旁站列表（分页）
+        // 获取旁站列表（分页，直接从数据库读取）
         $stmt = $this->db->prepare('SELECT * FROM side_sites WHERE domain_id = ? ORDER BY side_domain LIMIT ? OFFSET ?');
         $stmt->execute([$domainId, $perPage, $offset]);
         $sites = $stmt->fetchAll();
 
-        // 如果需要检测IP
-        if ($checkIp && !empty($sites)) {
-            foreach ($sites as &$site) {
-                $currentIp = $this->resolveIP($site['side_domain']);
-                $site['current_ip'] = $currentIp;
-                $site['ip_match'] = ($currentIp === $originalIp);
-            }
-        }
+        // 统计IP一致性
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM side_sites WHERE domain_id = ? AND ip_match = 1');
+        $stmt->execute([$domainId]);
+        $matchCount = (int) $stmt->fetchColumn();
+
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM side_sites WHERE domain_id = ? AND ip_match = 0');
+        $stmt->execute([$domainId]);
+        $mismatchCount = (int) $stmt->fetchColumn();
 
         return [
             'domain' => $domainInfo,
             'original_ip' => $originalIp,
             'sites' => $sites,
             'total' => $total,
+            'match_count' => $matchCount,
+            'mismatch_count' => $mismatchCount,
             'page' => $page,
             'per_page' => $perPage,
             'total_pages' => $totalPages,
@@ -523,9 +537,77 @@ class SideSiteDetector
     }
 
     /**
-     * 获取旁站列表（不分页，用于导出）
+     * 刷新旁站IP（重新检测并更新数据库）
      */
-    public function getAllSideSites(int $domainId, bool $checkIp = true): array
+    public function refreshSideSitesIp(int $domainId, ?string $originalIp = null, ?int $page = null, ?int $perPage = null): int
+    {
+        if ($originalIp === null) {
+            $stmt = $this->db->prepare('SELECT ip_address FROM domains WHERE id = ?');
+            $stmt->execute([$domainId]);
+            $originalIp = $stmt->fetchColumn();
+        }
+
+        // 获取要更新的旁站（可分页）
+        if ($page !== null && $perPage !== null) {
+            $offset = ($page - 1) * $perPage;
+            $stmt = $this->db->prepare('SELECT id, side_domain FROM side_sites WHERE domain_id = ? ORDER BY side_domain LIMIT ? OFFSET ?');
+            $stmt->execute([$domainId, $perPage, $offset]);
+        } else {
+            $stmt = $this->db->prepare('SELECT id, side_domain FROM side_sites WHERE domain_id = ?');
+            $stmt->execute([$domainId]);
+        }
+
+        $sites = $stmt->fetchAll();
+        $updateStmt = $this->db->prepare(
+            'UPDATE side_sites SET current_ip = ?, ip_match = ?, ip_checked_at = NOW() WHERE id = ?'
+        );
+
+        $count = 0;
+        foreach ($sites as $site) {
+            $currentIp = $this->resolveIP($site['side_domain'], true);
+            $ipMatch = ($currentIp !== null && $currentIp === $originalIp) ? 1 : 0;
+            $updateStmt->execute([$currentIp, $ipMatch, $site['id']]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * 批量刷新所有旁站IP（后台任务用）
+     */
+    public function refreshAllSideSitesIp(int $limit = 1000): array
+    {
+        // 获取需要刷新的旁站（未检测或超过24小时）
+        $stmt = $this->db->prepare(
+            'SELECT ss.id, ss.side_domain, d.ip_address as original_ip
+             FROM side_sites ss
+             JOIN domains d ON ss.domain_id = d.id
+             WHERE ss.ip_checked_at IS NULL OR ss.ip_checked_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+             LIMIT ?'
+        );
+        $stmt->execute([$limit]);
+        $sites = $stmt->fetchAll();
+
+        $updateStmt = $this->db->prepare(
+            'UPDATE side_sites SET current_ip = ?, ip_match = ?, ip_checked_at = NOW() WHERE id = ?'
+        );
+
+        $count = 0;
+        foreach ($sites as $site) {
+            $currentIp = $this->resolveIP($site['side_domain'], true);
+            $ipMatch = ($currentIp !== null && $currentIp === $site['original_ip']) ? 1 : 0;
+            $updateStmt->execute([$currentIp, $ipMatch, $site['id']]);
+            $count++;
+        }
+
+        return ['updated' => $count, 'remaining' => max(0, count($sites) - $count)];
+    }
+
+    /**
+     * 获取旁站列表（不分页，用于导出，直接从数据库读取）
+     */
+    public function getAllSideSites(int $domainId, bool $unused = true): array
     {
         $stmt = $this->db->prepare('SELECT * FROM domains WHERE id = ?');
         $stmt->execute([$domainId]);
@@ -541,12 +623,10 @@ class SideSiteDetector
         $stmt->execute([$domainId]);
         $sites = $stmt->fetchAll();
 
-        if ($checkIp && !empty($sites)) {
-            foreach ($sites as &$site) {
-                $currentIp = $this->resolveIP($site['side_domain']);
-                $site['current_ip'] = $currentIp;
-                $site['ip_match'] = ($currentIp === $originalIp);
-            }
+        // 直接从数据库读取，current_ip 和 ip_match 已存在
+        // 转换 ip_match 为布尔值以兼容现有代码
+        foreach ($sites as &$site) {
+            $site['ip_match'] = ($site['ip_match'] == 1);
         }
 
         return [
