@@ -394,6 +394,21 @@ try {
             $result = ['success' => true, 'count' => $count];
             break;
 
+        // 搜索域名和旁站
+        case 'search':
+            if ($method !== 'GET') {
+                throw new Exception('Method not allowed', 405);
+            }
+            $query = $_GET['q'] ?? '';
+            $limit = (int) ($_GET['limit'] ?? 50);
+
+            if (empty($query)) {
+                throw new Exception('请输入搜索内容', 400);
+            }
+
+            $result = $detector->search($query, $limit);
+            break;
+
         default:
             throw new Exception('Unknown action', 400);
     }

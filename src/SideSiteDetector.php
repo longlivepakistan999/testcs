@@ -1081,4 +1081,52 @@ class SideSiteDetector
 
         return $stmt->rowCount();
     }
+
+    /**
+     * 搜索域名和旁站
+     * 搜索指定URL是主域名还是某个主域名的旁站
+     */
+    public function search(string $query, int $limit = 50): array
+    {
+        $query = $this->normalizeDomain($query);
+
+        if (empty($query)) {
+            return ['domains' => [], 'side_sites' => []];
+        }
+
+        $searchPattern = '%' . $query . '%';
+
+        // 搜索主域名表
+        $stmt = $this->db->prepare(
+            'SELECT id, domain, ip_address, is_cloudflare, side_site_count, hosting_type, status, detected_at
+             FROM domains
+             WHERE domain LIKE ?
+             ORDER BY domain
+             LIMIT ?'
+        );
+        $stmt->execute([$searchPattern, $limit]);
+        $domains = $stmt->fetchAll();
+
+        // 搜索旁站表（并关联主域名信息）
+        $stmt = $this->db->prepare(
+            'SELECT ss.id, ss.side_domain, ss.ip_address, ss.current_ip, ss.ip_match, ss.last_resolved,
+                    d.id as main_domain_id, d.domain as main_domain, d.ip_address as main_ip,
+                    d.hosting_type, d.is_cloudflare
+             FROM side_sites ss
+             JOIN domains d ON ss.domain_id = d.id
+             WHERE ss.side_domain LIKE ?
+             ORDER BY ss.side_domain
+             LIMIT ?'
+        );
+        $stmt->execute([$searchPattern, $limit]);
+        $sideSites = $stmt->fetchAll();
+
+        return [
+            'domains' => $domains,
+            'side_sites' => $sideSites,
+            'query' => $query,
+            'domain_count' => count($domains),
+            'side_site_count' => count($sideSites),
+        ];
+    }
 }
