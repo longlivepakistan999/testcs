@@ -1,0 +1,30 @@
+# 配置文件（包含敏感信息）
+config/config.php
+
+# 缓存文件
+cache/*
+!cache/.gitkeep
+*.cache
+
+# IDE和编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+
+# Composer（如果将来使用）
+vendor/
+composer.lock
