@@ -59,11 +59,13 @@ CREATE TABLE IF NOT EXISTS `cloudflare_ips` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Cloudflare IP缓存表';
 
 -- 复合索引优化（大数据量查询）
-ALTER TABLE `domains` ADD INDEX `idx_status_created` (`status`, `created_at`) ALGORITHM=INPLACE;
-ALTER TABLE `domains` ADD INDEX `idx_status_hosting` (`status`, `hosting_type`) ALGORITHM=INPLACE;
-ALTER TABLE `side_sites` ADD INDEX `idx_domain_side` (`domain_id`, `side_domain`) ALGORITHM=INPLACE;
+-- 注意：如果索引已存在会报错，可忽略或先删除再创建
+ALTER TABLE `domains` ADD INDEX `idx_status_created` (`status`, `created_at`);
+ALTER TABLE `domains` ADD INDEX `idx_status_hosting` (`status`, `hosting_type`);
+ALTER TABLE `side_sites` ADD INDEX `idx_domain_side` (`domain_id`, `side_domain`);
 
--- 全文索引优化搜索（MySQL 5.6+/MariaDB 10.0.5+）
+-- 全文索引优化搜索（MySQL 5.6+/MariaDB 10.0.5+，InnoDB引擎）
+-- 注意：全文索引对 LIKE '%xxx%' 查询无效，但可用于 MATCH...AGAINST 全文搜索
 ALTER TABLE `domains` ADD FULLTEXT INDEX `ft_domain` (`domain`);
 ALTER TABLE `side_sites` ADD FULLTEXT INDEX `ft_side_domain` (`side_domain`);
 
