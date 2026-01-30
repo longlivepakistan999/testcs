@@ -186,18 +186,24 @@ class SideSiteDetector
 
     /**
      * 调用ViewDNS API查询旁站
+     * @param string $host IP地址或域名
      */
-    private function queryViewDNS(string $ip): array|false
+    private function queryViewDNS(string $host): array|false
     {
         $apiKey = $this->config['viewdns']['api_key'];
         $apiUrl = $this->config['viewdns']['api_url'];
 
-        $url = sprintf('%s?ip=%s&apikey=%s&output=json', $apiUrl, urlencode($ip), urlencode($apiKey));
+        // ViewDNS API使用host参数
+        $url = sprintf('%s?host=%s&apikey=%s&output=json', $apiUrl, urlencode($host), urlencode($apiKey));
 
         $context = stream_context_create([
             'http' => [
                 'timeout' => 30,
-                'header' => 'User-Agent: SideSiteDetector/1.0',
+                'header' => "User-Agent: SideSiteDetector/1.0\r\nAccept: application/json",
+            ],
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true,
             ],
         ]);
 
@@ -210,6 +216,10 @@ class SideSiteDetector
         $data = json_decode($response, true);
 
         if (!$data || !isset($data['response']['domains'])) {
+            // 检查是否有错误信息
+            if (isset($data['response']['error'])) {
+                throw new \RuntimeException('ViewDNS API错误: ' . $data['response']['error']);
+            }
             return false;
         }
 

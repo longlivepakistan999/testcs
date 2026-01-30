@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-这是一个基于 PHP 的旁站探测系统，用于市场调研分析，帮助判断域名使用的是共享空间还是独立服务器。
+这是一个基于 PHP 的旁站探测系统，用于市场调研分析，帮助判断域名使用的是共享空间还是独立服务器。支持大规模批量处理（10万+域名）。
 
 ### 主要功能
 
@@ -11,6 +11,7 @@
 3. **旁站探测**: 使用ViewDNS.info API进行反向IP查询，获取同IP下的其他域名
 4. **主机类型判断**: 根据旁站数量判断是共享空间还是独立服务器
 5. **数据导出**: 支持CSV和JSON格式导出
+6. **批量处理**: CLI工具支持大规模域名批量导入、后台处理、批量导出
 
 ## 项目结构
 
@@ -19,7 +20,8 @@ testcs/
 ├── CLAUDE.md              # 本文件 - AI助手指南
 ├── bootstrap.php          # 应用引导文件（自动加载、配置初始化）
 ├── config/
-│   └── config.php         # 配置文件（API密钥、数据库连接等）
+│   ├── config.php         # 配置文件（API密钥、数据库连接等）
+│   └── config.example.php # 配置文件示例
 ├── database/
 │   └── schema.sql         # 数据库结构SQL文件
 ├── src/
@@ -29,7 +31,12 @@ testcs/
 ├── public/
 │   ├── index.php          # 前端页面（Web界面）
 │   └── api.php            # RESTful API接口
-└── cache/                 # 缓存目录（Cloudflare IP缓存）
+├── cli/
+│   ├── import.php         # 批量导入域名脚本
+│   ├── process.php        # 后台队列处理脚本
+│   └── export.php         # 批量导出脚本
+├── cache/                 # 缓存目录（Cloudflare IP缓存）
+└── logs/                  # 日志目录
 ```
 
 ## 技术栈
@@ -38,6 +45,101 @@ testcs/
 - **数据库**: MySQL 5.7+ / MariaDB 10.3+
 - **前端**: 原生HTML/CSS/JavaScript（无框架依赖）
 - **外部API**: ViewDNS.info Reverse IP API
+
+## CLI命令行工具（大规模批量处理）
+
+### 1. 批量导入域名
+
+```bash
+# 从TXT文件导入（每行一个域名）
+php cli/import.php domains.txt
+
+# 从CSV文件导入（第一列为域名）
+php cli/import.php domains.csv
+
+# 跳过重复域名
+php cli/import.php domains.txt --skip-duplicates
+
+# 查看帮助
+php cli/import.php --help
+```
+
+### 2. 后台队列处理
+
+```bash
+# 开始处理队列
+php cli/process.php
+
+# 自定义参数
+php cli/process.php --batch=50 --delay=1000
+
+# 限制处理数量
+php cli/process.php --limit=1000
+
+# 查看当前状态
+php cli/process.php --status
+
+# 重试失败的域名
+php cli/process.php --retry
+
+# 后台运行（推荐）
+nohup php cli/process.php --batch=100 > logs/process.log 2>&1 &
+
+# 或使用screen
+screen -S detector
+php cli/process.php --batch=100
+# Ctrl+A+D 分离
+```
+
+**参数说明：**
+- `--batch=N`: 每批处理数量（默认100）
+- `--delay=N`: API调用间隔毫秒（默认500）
+- `--limit=N`: 总处理数量限制
+- `--status`: 显示当前处理状态
+- `--retry`: 重试所有失败的域名
+
+### 3. 批量导出
+
+```bash
+# 导出到CSV文件
+php cli/export.php -o result.csv
+
+# 导出为JSON格式
+php cli/export.php -o result.json -f json
+
+# 只导出共享空间
+php cli/export.php --type=shared -o shared.csv
+
+# 快速导出（不检测当前IP）
+php cli/export.php --no-ip-check -o quick.csv
+
+# 查看帮助
+php cli/export.php --help
+```
+
+### 处理10万+域名的推荐流程
+
+```bash
+# 1. 导入域名
+php cli/import.php domains.txt
+
+# 2. 查看状态
+php cli/process.php --status
+
+# 3. 后台处理（使用screen）
+screen -S detector
+php cli/process.php --batch=100 --delay=500
+
+# 4. 查看进度（新终端）
+php cli/process.php --status
+
+# 5. 导出结果
+php cli/export.php -o result.csv --no-ip-check
+```
+
+**预估时间：**
+- 10万域名，500ms延迟 ≈ 14小时
+- 10万域名，1000ms延迟 ≈ 28小时
 
 ## 开发规范
 
@@ -99,10 +201,10 @@ return [
 ## 部署步骤
 
 1. **导入数据库**: 执行 `database/schema.sql`
-2. **配置参数**: 编辑 `config/config.php`，填入：
+2. **配置参数**: 复制 `config/config.example.php` 为 `config/config.php`，填入：
    - ViewDNS.info API密钥
    - MySQL数据库连接信息
-3. **设置目录权限**: `cache/` 目录需要写入权限
+3. **设置目录权限**: `cache/` 和 `logs/` 目录需要写入权限
 4. **配置Web服务器**: 将 `public/` 目录设为网站根目录
 
 ## 主机类型判断逻辑
@@ -117,6 +219,7 @@ return [
 1. **API限制**: ViewDNS.info API有调用频率限制，批量检测时会自动添加延迟
 2. **Cloudflare域名**: 使用Cloudflare CDN的域名无法获取真实IP，会自动跳过旁站探测
 3. **IP变化**: 旁站的IP可能会变化，系统支持实时检测当前IP与原始IP的一致性
+4. **大规模处理**: 使用CLI工具处理大量域名，支持断点续传和后台运行
 
 ## 常见问题
 
@@ -129,10 +232,17 @@ A: 访问 https://viewdns.info/api/ 注册账号并购买API访问权限。
 ### Q: 导出的CSV文件乱码？
 A: 导出文件使用UTF-8编码并添加了BOM，如果仍有问题，请使用记事本或Excel的"数据导入"功能指定UTF-8编码打开。
 
+### Q: 处理中断了怎么办？
+A: 直接重新运行 `php cli/process.php`，系统会自动从上次中断的地方继续处理。
+
+### Q: 如何重试失败的域名？
+A: 运行 `php cli/process.php --retry`，会将所有失败的域名重置为待处理状态。
+
 ## 给AI助手的提示
 
 1. **修改配置**: 配置文件在 `config/config.php`
 2. **添加功能**: 核心逻辑在 `src/SideSiteDetector.php`
 3. **修改界面**: 前端代码在 `public/index.php`
 4. **API扩展**: API接口在 `public/api.php`
-5. **数据库变更**: 先修改 `database/schema.sql`，再执行迁移
+5. **CLI工具**: 命令行脚本在 `cli/` 目录
+6. **数据库变更**: 先修改 `database/schema.sql`，再执行迁移
