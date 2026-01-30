@@ -681,11 +681,17 @@
         // 检测单个域名
         async function detectDomain(id) {
             try {
+                // 设置60秒超时
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
+
                 const response = await fetch(`${API_URL}?action=detect`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id })
+                    body: JSON.stringify({ id: id }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
                 const result = await response.json();
 
                 loadStatistics();
@@ -702,7 +708,13 @@
                     alert(result.data?.message || result.message || '检测失败');
                 }
             } catch (e) {
-                alert('检测失败: ' + e.message);
+                if (e.name === 'AbortError') {
+                    alert('检测超时，域名可能旁站过多。请稍后查看结果或使用CLI工具处理。');
+                } else {
+                    alert('检测失败: ' + e.message);
+                }
+                loadStatistics();
+                loadDomains(currentPage);
             }
         }
 
@@ -711,11 +723,17 @@
             if (!confirm('确定要开始处理检测队列吗？')) return;
 
             try {
+                // 设置较长的超时时间（5分钟）
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 300000);
+
                 const response = await fetch(`${API_URL}?action=process`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ limit: 10 })
+                    body: JSON.stringify({ limit: 5 }),  // 每次处理5个，避免超时
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
                 const result = await response.json();
 
                 loadStatistics();
@@ -729,7 +747,11 @@
                     alert(result.message || '处理失败');
                 }
             } catch (e) {
-                alert('处理失败: ' + e.message);
+                if (e.name === 'AbortError') {
+                    alert('处理超时，请尝试使用CLI工具处理大量域名：\nphp cli/process.php --batch=100');
+                } else {
+                    alert('处理失败: ' + e.message);
+                }
             }
         }
 
