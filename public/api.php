@@ -282,6 +282,79 @@ try {
             $result = $exportData;
             break;
 
+        // 批量重试选中的域名
+        case 'batch_retry':
+            if ($method !== 'POST') {
+                throw new Exception('Method not allowed', 405);
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $ids = $input['ids'] ?? [];
+
+            if (empty($ids) || !is_array($ids)) {
+                throw new Exception('请选择要重试的域名', 400);
+            }
+
+            $count = $detector->batchRetry($ids);
+            $result = ['success' => true, 'count' => $count];
+            break;
+
+        // 重试所有失败的域名
+        case 'retry_all_failed':
+            if ($method !== 'POST') {
+                throw new Exception('Method not allowed', 405);
+            }
+
+            $count = $detector->retryAllFailed();
+            $result = ['success' => true, 'count' => $count];
+            break;
+
+        // 批量导出选中的域名
+        case 'batch_export':
+            if ($method !== 'GET') {
+                throw new Exception('Method not allowed', 405);
+            }
+            $idsStr = $_GET['ids'] ?? '';
+            $format = $_GET['format'] ?? 'csv';
+
+            if (empty($idsStr)) {
+                throw new Exception('请选择要导出的域名', 400);
+            }
+
+            $ids = array_map('intval', explode(',', $idsStr));
+            $ids = array_filter($ids, fn($id) => $id > 0);
+
+            if (empty($ids)) {
+                throw new Exception('无效的域名ID', 400);
+            }
+
+            $exportData = $detector->batchExport($ids, $format);
+
+            if ($format === 'csv') {
+                header('Content-Type: text/csv; charset=utf-8');
+                header('Content-Disposition: attachment; filename="batch_export_' . date('Ymd_His') . '.csv"');
+                echo "\xEF\xBB\xBF"; // UTF-8 BOM
+                echo $exportData;
+                exit;
+            }
+            $result = $exportData;
+            break;
+
+        // 批量删除选中的域名
+        case 'batch_delete':
+            if ($method !== 'POST') {
+                throw new Exception('Method not allowed', 405);
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $ids = $input['ids'] ?? [];
+
+            if (empty($ids) || !is_array($ids)) {
+                throw new Exception('请选择要删除的域名', 400);
+            }
+
+            $count = $detector->batchDelete($ids);
+            $result = ['success' => true, 'count' => $count];
+            break;
+
         default:
             throw new Exception('Unknown action', 400);
     }

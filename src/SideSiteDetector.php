@@ -700,4 +700,154 @@ class SideSiteDetector
 
         return $csv;
     }
+
+    /**
+     * 批量重试域名
+     */
+    public function batchRetry(array $ids): int
+    {
+        if (empty($ids)) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->prepare(
+            "UPDATE domains SET status = 'pending', error_message = NULL WHERE id IN ($placeholders)"
+        );
+        $stmt->execute($ids);
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * 重试所有失败的域名
+     */
+    public function retryAllFailed(): int
+    {
+        $stmt = $this->db->prepare(
+            "UPDATE domains SET status = 'pending', error_message = NULL WHERE status = 'failed'"
+        );
+        $stmt->execute();
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * 批量导出域名及旁站
+     */
+    public function batchExport(array $ids, string $format = 'csv'): string|array
+    {
+        if (empty($ids)) {
+            return $format === 'csv' ? '' : [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+        // 获取域名信息
+        $stmt = $this->db->prepare("SELECT * FROM domains WHERE id IN ($placeholders)");
+        $stmt->execute($ids);
+        $domains = $stmt->fetchAll();
+
+        if ($format === 'json') {
+            $result = [];
+            foreach ($domains as $domain) {
+                $stmt = $this->db->prepare('SELECT * FROM side_sites WHERE domain_id = ?');
+                $stmt->execute([$domain['id']]);
+                $sideSites = $stmt->fetchAll();
+
+                $result[] = [
+                    'domain' => $domain['domain'],
+                    'ip_address' => $domain['ip_address'],
+                    'is_cloudflare' => (bool) $domain['is_cloudflare'],
+                    'side_site_count' => (int) $domain['side_site_count'],
+                    'hosting_type' => $domain['hosting_type'],
+                    'status' => $domain['status'],
+                    'error_message' => $domain['error_message'],
+                    'detected_at' => $domain['detected_at'],
+                    'side_sites' => array_map(fn($s) => [
+                        'domain' => $s['side_domain'],
+                        'ip_address' => $s['ip_address'],
+                        'last_resolved' => $s['last_resolved'],
+                    ], $sideSites),
+                ];
+            }
+            return $result;
+        }
+
+        // CSV format
+        $csv = "域名,IP地址,是否CF,旁站数,主机类型,状态,错误信息,检测时间,旁站域名,旁站IP,最后解析\n";
+
+        foreach ($domains as $domain) {
+            $stmt = $this->db->prepare('SELECT * FROM side_sites WHERE domain_id = ?');
+            $stmt->execute([$domain['id']]);
+            $sideSites = $stmt->fetchAll();
+
+            $hostingType = $domain['hosting_type'] === 'shared' ? '共享空间' :
+                ($domain['hosting_type'] === 'dedicated' ? '独立服务器' : '未知');
+
+            if (empty($sideSites)) {
+                $csv .= sprintf(
+                    "%s,%s,%s,%d,%s,%s,%s,%s,,,\n",
+                    $domain['domain'],
+                    $domain['ip_address'] ?? '',
+                    $domain['is_cloudflare'] ? '是' : '否',
+                    $domain['side_site_count'] ?? 0,
+                    $hostingType,
+                    $domain['status'],
+                    $domain['error_message'] ?? '',
+                    $domain['detected_at'] ?? ''
+                );
+            } else {
+                foreach ($sideSites as $i => $site) {
+                    if ($i === 0) {
+                        $csv .= sprintf(
+                            "%s,%s,%s,%d,%s,%s,%s,%s,%s,%s,%s\n",
+                            $domain['domain'],
+                            $domain['ip_address'] ?? '',
+                            $domain['is_cloudflare'] ? '是' : '否',
+                            $domain['side_site_count'] ?? 0,
+                            $hostingType,
+                            $domain['status'],
+                            $domain['error_message'] ?? '',
+                            $domain['detected_at'] ?? '',
+                            $site['side_domain'],
+                            $site['ip_address'] ?? '',
+                            $site['last_resolved'] ?? ''
+                        );
+                    } else {
+                        $csv .= sprintf(
+                            ",,,,,,,,,%s,%s,%s\n",
+                            $site['side_domain'],
+                            $site['ip_address'] ?? '',
+                            $site['last_resolved'] ?? ''
+                        );
+                    }
+                }
+            }
+        }
+
+        return $csv;
+    }
+
+    /**
+     * 批量删除域名
+     */
+    public function batchDelete(array $ids): int
+    {
+        if (empty($ids)) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+        // 先删除旁站
+        $stmt = $this->db->prepare("DELETE FROM side_sites WHERE domain_id IN ($placeholders)");
+        $stmt->execute($ids);
+
+        // 再删除域名
+        $stmt = $this->db->prepare("DELETE FROM domains WHERE id IN ($placeholders)");
+        $stmt->execute($ids);
+
+        return $stmt->rowCount();
+    }
 }

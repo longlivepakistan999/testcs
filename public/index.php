@@ -251,6 +251,32 @@
         .export-section {
             margin-left: auto;
         }
+        .batch-actions {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .batch-actions.show {
+            display: flex;
+        }
+        .batch-actions span {
+            font-weight: 500;
+            color: #667eea;
+        }
+        .checkbox-cell {
+            width: 40px;
+            text-align: center;
+        }
+        .checkbox-cell input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -324,15 +350,28 @@
                     <option value="failed">失败</option>
                     <option value="skipped">已跳过</option>
                 </select>
+                <button class="btn btn-danger btn-sm" onclick="retryAllFailed()">重试全部失败</button>
                 <div class="export-section">
                     <button class="btn btn-info btn-sm" onclick="exportDomains('csv')">导出域名CSV</button>
                     <button class="btn btn-warning btn-sm" onclick="exportAll('csv')">导出旁站CSV</button>
                     <button class="btn btn-warning btn-sm" onclick="exportAll('json')">导出旁站JSON</button>
                 </div>
             </div>
+
+            <!-- 批量操作栏 -->
+            <div class="batch-actions" id="batchActions">
+                <span>已选择 <b id="selectedCount">0</b> 个</span>
+                <button class="btn btn-success btn-sm" onclick="batchRetry()">重试选中</button>
+                <button class="btn btn-info btn-sm" onclick="batchExport('csv')">导出选中CSV</button>
+                <button class="btn btn-warning btn-sm" onclick="batchExport('json')">导出选中JSON</button>
+                <button class="btn btn-danger btn-sm" onclick="batchDelete()">删除选中</button>
+                <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
+            </div>
+
             <table>
                 <thead>
                     <tr>
+                        <th class="checkbox-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                         <th>ID</th>
                         <th>域名</th>
                         <th>IP地址</th>
@@ -344,7 +383,7 @@
                     </tr>
                 </thead>
                 <tbody id="domainList">
-                    <tr><td colspan="8" class="loading">加载中...</td></tr>
+                    <tr><td colspan="9" class="loading">加载中...</td></tr>
                 </tbody>
             </table>
             <div class="pagination" id="pagination"></div>
@@ -355,6 +394,7 @@
         const API_URL = 'api.php';
         let currentPage = 1;
         let totalPages = 1;
+        let selectedIds = new Set();
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
@@ -384,7 +424,7 @@
             currentPage = page;
             const status = document.getElementById('statusFilter').value;
             const tbody = document.getElementById('domainList');
-            tbody.innerHTML = '<tr><td colspan="8" class="loading">加载中...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="loading">加载中...</td></tr>';
 
             try {
                 let url = `${API_URL}?action=list&page=${page}&per_page=20`;
@@ -410,27 +450,189 @@
             const tbody = document.getElementById('domainList');
 
             if (!domains || domains.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="loading">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="loading">暂无数据</td></tr>';
+                updateBatchActions();
                 return;
             }
 
             tbody.innerHTML = domains.map(d => `
                 <tr>
+                    <td class="checkbox-cell">
+                        <input type="checkbox" class="row-checkbox" data-id="${d.id}"
+                            ${selectedIds.has(d.id) ? 'checked' : ''}
+                            onchange="toggleSelect(${d.id})">
+                    </td>
                     <td>${d.id}</td>
                     <td><strong>${escapeHtml(d.domain)}</strong></td>
                     <td class="ip-info">${d.ip_address || '<span class="text-muted">-</span>'}</td>
                     <td>${d.is_cloudflare == 1 ? '<span class="badge badge-cf">CF</span>' : '<span class="text-muted">-</span>'}</td>
-                    <td>${d.side_site_count > 0 ? `<a href="javascript:void(0)" onclick="viewSideSites(${d.id}, '${escapeHtml(d.domain)}')" style="color: #667eea; font-weight: bold;">${d.side_site_count}</a>` : '<span class="text-muted">-</span>'}</td>
+                    <td>${d.side_site_count >= 0 && d.status === 'completed' ? `<a href="javascript:void(0)" onclick="viewSideSites(${d.id}, '${escapeHtml(d.domain)}')" style="color: #667eea; font-weight: bold;">${d.side_site_count}</a>` : '<span class="text-muted">-</span>'}</td>
                     <td>${getHostingTypeBadge(d.hosting_type)}</td>
                     <td>${getStatusBadge(d.status)}</td>
                     <td class="action-buttons">
                         ${d.status === 'pending' ? `<button class="btn btn-primary btn-sm" onclick="detectDomain(${d.id})">检测</button>` : ''}
                         ${d.status === 'failed' ? `<button class="btn btn-success btn-sm" onclick="retryDomain(${d.id})">重试</button>` : ''}
-                        ${d.side_site_count > 0 ? `<button class="btn btn-info btn-sm" onclick="viewSideSites(${d.id}, '${escapeHtml(d.domain)}')">查看</button>` : ''}
+                        ${(d.side_site_count >= 0 && d.status === 'completed') ? `<button class="btn btn-info btn-sm" onclick="viewSideSites(${d.id}, '${escapeHtml(d.domain)}')">查看</button>` : ''}
                         <button class="btn btn-danger btn-sm" onclick="deleteDomain(${d.id})">删除</button>
                     </td>
                 </tr>
             `).join('');
+
+            updateBatchActions();
+            updateSelectAllCheckbox();
+        }
+
+        // 切换单个选择
+        function toggleSelect(id) {
+            if (selectedIds.has(id)) {
+                selectedIds.delete(id);
+            } else {
+                selectedIds.add(id);
+            }
+            updateBatchActions();
+            updateSelectAllCheckbox();
+        }
+
+        // 全选/取消全选
+        function toggleSelectAll() {
+            const checkboxes = document.querySelectorAll('.row-checkbox');
+            const selectAll = document.getElementById('selectAll').checked;
+
+            checkboxes.forEach(cb => {
+                const id = parseInt(cb.dataset.id);
+                if (selectAll) {
+                    selectedIds.add(id);
+                    cb.checked = true;
+                } else {
+                    selectedIds.delete(id);
+                    cb.checked = false;
+                }
+            });
+            updateBatchActions();
+        }
+
+        // 更新全选复选框状态
+        function updateSelectAllCheckbox() {
+            const checkboxes = document.querySelectorAll('.row-checkbox');
+            const selectAllCb = document.getElementById('selectAll');
+            if (checkboxes.length === 0) {
+                selectAllCb.checked = false;
+                return;
+            }
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            selectAllCb.checked = allChecked;
+        }
+
+        // 更新批量操作栏
+        function updateBatchActions() {
+            const batchActions = document.getElementById('batchActions');
+            const selectedCount = document.getElementById('selectedCount');
+            selectedCount.textContent = selectedIds.size;
+
+            if (selectedIds.size > 0) {
+                batchActions.classList.add('show');
+            } else {
+                batchActions.classList.remove('show');
+            }
+        }
+
+        // 清除选择
+        function clearSelection() {
+            selectedIds.clear();
+            document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAll').checked = false;
+            updateBatchActions();
+        }
+
+        // 批量重试
+        async function batchRetry() {
+            if (selectedIds.size === 0) {
+                alert('请先选择域名');
+                return;
+            }
+            if (!confirm(`确定要重试选中的 ${selectedIds.size} 个域名吗？`)) return;
+
+            try {
+                const response = await fetch(`${API_URL}?action=batch_retry`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: Array.from(selectedIds) })
+                });
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    alert(`已重置 ${result.data.count} 个域名为待检测状态`);
+                    clearSelection();
+                    loadStatistics();
+                    loadDomains(currentPage);
+                } else {
+                    alert(result.message || '操作失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        }
+
+        // 重试全部失败
+        async function retryAllFailed() {
+            if (!confirm('确定要重试所有失败的域名吗？')) return;
+
+            try {
+                const response = await fetch(`${API_URL}?action=retry_all_failed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    alert(`已重置 ${result.data.count} 个失败的域名为待检测状态`);
+                    loadStatistics();
+                    loadDomains(currentPage);
+                } else {
+                    alert(result.message || '操作失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        }
+
+        // 批量导出
+        function batchExport(format) {
+            if (selectedIds.size === 0) {
+                alert('请先选择域名');
+                return;
+            }
+            const ids = Array.from(selectedIds).join(',');
+            window.open(`${API_URL}?action=batch_export&ids=${ids}&format=${format}`, '_blank');
+        }
+
+        // 批量删除
+        async function batchDelete() {
+            if (selectedIds.size === 0) {
+                alert('请先选择域名');
+                return;
+            }
+            if (!confirm(`确定要删除选中的 ${selectedIds.size} 个域名吗？此操作不可恢复！`)) return;
+
+            try {
+                const response = await fetch(`${API_URL}?action=batch_delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: Array.from(selectedIds) })
+                });
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    alert(`已删除 ${result.data.count} 个域名`);
+                    clearSelection();
+                    loadStatistics();
+                    loadDomains(currentPage);
+                } else {
+                    alert(result.message || '删除失败');
+                }
+            } catch (e) {
+                alert('删除失败: ' + e.message);
+            }
         }
 
         // 渲染分页
