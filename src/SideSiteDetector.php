@@ -192,10 +192,12 @@ class SideSiteDetector
             // 尝试获取所有IP
             $ips = gethostbynamel($domain);
             if ($ips && count($ips) > 0) {
-                $ip = $ips[0];
+                $ip = trim($ips[0]);
             } else {
                 $ip = null;
             }
+        } else {
+            $ip = trim($ip);
         }
 
         // 保存到缓存
@@ -321,6 +323,9 @@ class SideSiteDetector
         $stmt = $this->db->prepare('DELETE FROM side_sites WHERE domain_id = ?');
         $stmt->execute([$domainId]);
 
+        // 标准化原始IP
+        $originalIp = trim($ip);
+
         // 插入新数据（包含当前IP检测）
         $stmt = $this->db->prepare(
             'INSERT INTO side_sites (domain_id, ip_address, side_domain, current_ip, ip_match, last_resolved, ip_checked_at)
@@ -333,9 +338,11 @@ class SideSiteDetector
 
             // 检测旁站当前IP
             $currentIp = $this->resolveIP($sideDomain, true);
-            $ipMatch = ($currentIp !== null && $currentIp === $ip) ? 1 : 0;
 
-            $stmt->execute([$domainId, $ip, $sideDomain, $currentIp, $ipMatch, $lastResolved]);
+            // 比较IP是否一致（忽略空格）
+            $ipMatch = ($currentIp !== null && trim($currentIp) === $originalIp) ? 1 : 0;
+
+            $stmt->execute([$domainId, $originalIp, $sideDomain, $currentIp, $ipMatch, $lastResolved]);
         }
     }
 
@@ -547,6 +554,9 @@ class SideSiteDetector
             $originalIp = $stmt->fetchColumn();
         }
 
+        // 标准化原始IP
+        $originalIp = trim($originalIp ?? '');
+
         // 获取要更新的旁站（可分页）
         if ($page !== null && $perPage !== null) {
             $offset = ($page - 1) * $perPage;
@@ -565,7 +575,8 @@ class SideSiteDetector
         $count = 0;
         foreach ($sites as $site) {
             $currentIp = $this->resolveIP($site['side_domain'], true);
-            $ipMatch = ($currentIp !== null && $currentIp === $originalIp) ? 1 : 0;
+            // 比较IP是否一致（忽略空格）
+            $ipMatch = ($currentIp !== null && trim($currentIp) === $originalIp) ? 1 : 0;
             $updateStmt->execute([$currentIp, $ipMatch, $site['id']]);
             $count++;
         }
@@ -596,7 +607,9 @@ class SideSiteDetector
         $count = 0;
         foreach ($sites as $site) {
             $currentIp = $this->resolveIP($site['side_domain'], true);
-            $ipMatch = ($currentIp !== null && $currentIp === $site['original_ip']) ? 1 : 0;
+            $originalIp = trim($site['original_ip'] ?? '');
+            // 比较IP是否一致（忽略空格）
+            $ipMatch = ($currentIp !== null && trim($currentIp) === $originalIp) ? 1 : 0;
             $updateStmt->execute([$currentIp, $ipMatch, $site['id']]);
             $count++;
         }
