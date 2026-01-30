@@ -514,10 +514,24 @@ class SideSiteDetector
 
     /**
      * 导出单个域名的旁站数据
+     * @param string $ipFilter 筛选：all-全部, match-仅一致, mismatch-仅不一致
      */
-    public function exportSingleDomain(int $domainId, string $format = 'csv'): string
+    public function exportSingleDomain(int $domainId, string $format = 'csv', string $ipFilter = 'all'): string
     {
         $data = $this->getAllSideSites($domainId, true);
+
+        // 根据 IP 筛选
+        if ($ipFilter !== 'all' && !empty($data['sites'])) {
+            $data['sites'] = array_filter($data['sites'], function ($site) use ($ipFilter) {
+                if ($ipFilter === 'match') {
+                    return $site['ip_match'] === true;
+                } elseif ($ipFilter === 'mismatch') {
+                    return $site['ip_match'] === false;
+                }
+                return true;
+            });
+            $data['sites'] = array_values($data['sites']); // 重新索引
+        }
 
         if ($format === 'csv') {
             return $this->generateCsv($data['domain'], $data['sites']);

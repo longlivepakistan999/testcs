@@ -143,8 +143,13 @@
         <div class="card">
             <h2>旁站列表</h2>
             <div class="action-bar">
-                <button class="btn btn-info" onclick="exportCsv()">导出全部CSV</button>
-                <button class="btn btn-info" onclick="exportJson()">导出全部JSON</button>
+                <select id="exportFilter" style="padding: 10px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="all">全部旁站</option>
+                    <option value="match">仅IP一致</option>
+                    <option value="mismatch">仅IP不一致</option>
+                </select>
+                <button class="btn btn-info" onclick="exportCsv()">导出CSV</button>
+                <button class="btn btn-info" onclick="exportJson()">导出JSON</button>
                 <button class="btn btn-success" onclick="refreshIp()">刷新IP检测</button>
             </div>
             <div class="stats-bar" id="statsBar" style="display: none;">
@@ -351,12 +356,14 @@
 
         // 导出CSV
         function exportCsv() {
-            window.open(`${API_URL}?action=export_single&id=${domainId}&format=csv`, '_blank');
+            const filter = document.getElementById('exportFilter').value;
+            window.open(`${API_URL}?action=export_single&id=${domainId}&format=csv&ip_filter=${filter}`, '_blank');
         }
 
         // 导出JSON
         function exportJson() {
-            window.open(`${API_URL}?action=export_single&id=${domainId}&format=json`, '_blank');
+            const filter = document.getElementById('exportFilter').value;
+            window.open(`${API_URL}?action=export_single&id=${domainId}&format=json&ip_filter=${filter}`, '_blank');
         }
 
         // 刷新IP检测

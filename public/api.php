@@ -146,12 +146,13 @@ try {
             }
             $domainId = (int) ($_GET['id'] ?? 0);
             $format = $_GET['format'] ?? 'csv';
+            $ipFilter = $_GET['ip_filter'] ?? 'all'; // all, match, mismatch
 
             if ($domainId <= 0) {
                 throw new Exception('无效的域名ID', 400);
             }
 
-            $exportData = $detector->exportSingleDomain($domainId, $format);
+            $exportData = $detector->exportSingleDomain($domainId, $format, $ipFilter);
 
             if ($format === 'csv') {
                 header('Content-Type: text/csv; charset=utf-8');
