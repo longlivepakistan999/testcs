@@ -10,8 +10,11 @@
 2. **Cloudflare检测**: 检测IP是否属于Cloudflare CDN（使用Cloudflare官方公开的IP范围）
 3. **旁站探测**: 使用ViewDNS.info API进行反向IP查询，获取同IP下的其他域名
 4. **主机类型判断**: 根据旁站数量判断是共享空间还是独立服务器
-5. **数据导出**: 支持CSV和JSON格式导出
-6. **批量处理**: CLI工具支持大规模域名批量导入、后台处理、批量导出
+5. **IP一致性检测**: 自动检测旁站当前IP与原始IP是否一致
+6. **全局搜索**: 搜索某个URL是主域名资产还是某个资产的旁站
+7. **数据导出**: 支持CSV和JSON格式导出，支持流式导出大数据量
+8. **批量处理**: CLI工具支持大规模域名批量导入、后台处理、批量导出
+9. **文件导入**: Web界面支持TXT/CSV文件上传导入域名
 
 ## 项目结构
 
@@ -29,7 +32,8 @@ testcs/
 │   ├── CloudflareDetector.php  # Cloudflare IP检测类
 │   └── SideSiteDetector.php    # 旁站探测核心类
 ├── public/
-│   ├── index.php          # 前端页面（Web界面）
+│   ├── index.php          # 前端页面（Web界面，含全局搜索）
+│   ├── detail.php         # 旁站详情页面（分页显示）
 │   └── api.php            # RESTful API接口
 ├── cli/
 │   ├── import.php         # 批量导入域名脚本
@@ -153,8 +157,21 @@ php cli/export.php -o result.csv --no-ip-check
 ### 数据库表结构
 
 - `domains`: 主域名表，存储待检测域名及检测结果
-- `side_sites`: 旁站表，存储每个域名的旁站信息
+- `side_sites`: 旁站表，存储每个域名的旁站信息（含当前IP、IP一致性）
 - `cloudflare_ips`: Cloudflare IP缓存表
+- `ip_cache`: IP解析缓存表（避免重复DNS查询）
+
+### 搜索功能
+
+系统支持全局搜索，可以查询某个URL是主域名资产还是某个资产的旁站：
+
+```
+GET api.php?action=search&q=example.com
+```
+
+返回结果包含：
+- `domains`: 匹配的主域名列表
+- `side_sites`: 匹配的旁站列表（含所属主域名信息）
 
 ### API接口
 
@@ -164,12 +181,21 @@ php cli/export.php -o result.csv --no-ip-check
 | `?action=add` | POST | 添加域名（支持批量） |
 | `?action=detect` | POST | 检测单个域名 |
 | `?action=process` | POST | 处理检测队列 |
-| `?action=side_sites` | GET | 获取旁站列表（带IP实时检测） |
+| `?action=side_sites` | GET | 获取旁站列表（支持分页，从数据库读取） |
+| `?action=refresh_ip` | POST | 刷新旁站IP（重新检测并更新数据库） |
 | `?action=statistics` | GET | 获取统计数据 |
-| `?action=delete` | POST | 删除域名 |
+| `?action=delete` | POST/DELETE | 删除域名 |
 | `?action=retry` | POST | 重新检测失败的域名 |
-| `?action=export_single` | GET | 导出单个域名的旁站 |
-| `?action=export_all` | GET | 导出所有域名的旁站 |
+| `?action=export_single` | GET | 导出单个域名的旁站（支持IP筛选） |
+| `?action=export_all` | GET | 导出所有域名的旁站（支持流式导出） |
+| `?action=export_stats` | GET | 获取导出统计（预估大小） |
+| `?action=import` | POST | 文件上传导入域名（TXT/CSV） |
+| `?action=export_domains` | GET | 导出域名列表（不含旁站） |
+| `?action=batch_retry` | POST | 批量重试选中的域名 |
+| `?action=retry_all_failed` | POST | 重试所有失败的域名 |
+| `?action=batch_export` | GET | 批量导出选中的域名 |
+| `?action=batch_delete` | POST | 批量删除选中的域名 |
+| `?action=search` | GET | 搜索域名和旁站（查询某URL是主域名还是旁站） |
 
 ## 配置说明
 

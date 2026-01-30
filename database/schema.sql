@@ -63,6 +63,10 @@ ALTER TABLE `domains` ADD INDEX `idx_status_created` (`status`, `created_at`) AL
 ALTER TABLE `domains` ADD INDEX `idx_status_hosting` (`status`, `hosting_type`) ALGORITHM=INPLACE;
 ALTER TABLE `side_sites` ADD INDEX `idx_domain_side` (`domain_id`, `side_domain`) ALGORITHM=INPLACE;
 
+-- 全文索引优化搜索（MySQL 5.6+/MariaDB 10.0.5+）
+ALTER TABLE `domains` ADD FULLTEXT INDEX `ft_domain` (`domain`);
+ALTER TABLE `side_sites` ADD FULLTEXT INDEX `ft_side_domain` (`side_domain`);
+
 -- IP检测缓存表（避免重复DNS查询）
 CREATE TABLE IF NOT EXISTS `ip_cache` (
     `domain` VARCHAR(255) NOT NULL PRIMARY KEY,
