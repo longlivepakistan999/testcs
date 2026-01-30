@@ -70,7 +70,8 @@ if (isset($options['retry'])) {
 
 // 刷新旁站IP
 if (isset($options['refresh-ip'])) {
-    refreshSideSitesIp($config);
+    $batchSize = isset($options['batch']) ? (int)$options['batch'] : 100;
+    refreshSideSitesIp($config, $batchSize);
     exit(0);
 }
 
@@ -320,7 +321,7 @@ function retryFailed()
 /**
  * 刷新所有旁站的当前IP
  */
-function refreshSideSitesIp($config)
+function refreshSideSitesIp($config, $batchSize = 100)
 {
     $db = Database::getInstance();
     $detector = new SideSiteDetector($config);
@@ -337,6 +338,7 @@ function refreshSideSitesIp($config)
     echo "============================================\n";
     echo "总旁站数: {$totalCount}\n";
     echo "需要刷新(IP为空): {$nullCount}\n";
+    echo "批次大小: {$batchSize}\n";
     echo "--------------------------------------------\n";
 
     if ($totalCount == 0) {
@@ -346,7 +348,6 @@ function refreshSideSitesIp($config)
 
     echo "开始刷新...\n\n";
 
-    $batchSize = 100;
     $processed = 0;
     $startTime = microtime(true);
 
