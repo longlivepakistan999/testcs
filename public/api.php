@@ -83,19 +83,21 @@ try {
             $result = ['results' => $detector->processQueue($limit)];
             break;
 
-        // 获取旁站列表（带实时IP检测）
+        // 获取旁站列表（带实时IP检测，支持分页）
         case 'side_sites':
             if ($method !== 'GET') {
                 throw new Exception('Method not allowed', 405);
             }
             $domainId = (int) ($_GET['id'] ?? 0);
             $checkIp = ($_GET['check_ip'] ?? '1') === '1';
+            $page = (int) ($_GET['page'] ?? 1);
+            $perPage = (int) ($_GET['per_page'] ?? 100);
 
             if ($domainId <= 0) {
                 throw new Exception('无效的域名ID', 400);
             }
 
-            $result = ['data' => $detector->getSideSitesWithIpCheck($domainId, $checkIp)];
+            $result = ['data' => $detector->getSideSitesWithIpCheck($domainId, $checkIp, $page, $perPage)];
             break;
 
         // 获取统计数据

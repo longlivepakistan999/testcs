@@ -203,63 +203,6 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-        .modal.show {
-            display: flex;
-        }
-        .modal-content {
-            background: white;
-            border-radius: 10px;
-            width: 95%;
-            max-width: 1000px;
-            max-height: 85vh;
-            overflow: auto;
-        }
-        .modal-header {
-            padding: 20px;
-            border-bottom: 1px solid #eee;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            background: white;
-            z-index: 10;
-        }
-        .modal-header h3 {
-            font-size: 18px;
-        }
-        .modal-close {
-            background: none;
-            border: none;
-            font-size: 24px;
-            cursor: pointer;
-            color: #999;
-        }
-        .modal-body {
-            padding: 20px;
-        }
-        .modal-footer {
-            padding: 15px 20px;
-            border-top: 1px solid #eee;
-            display: flex;
-            gap: 10px;
-            justify-content: flex-end;
-            position: sticky;
-            bottom: 0;
-            background: white;
-        }
         .loading {
             text-align: center;
             padding: 40px;
@@ -408,29 +351,10 @@
         </div>
     </div>
 
-    <!-- 旁站列表弹窗 -->
-    <div class="modal" id="sideSiteModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="modalTitle">旁站列表</h3>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="modalBody">
-                <div class="loading">加载中...</div>
-            </div>
-            <div class="modal-footer" id="modalFooter" style="display: none;">
-                <button class="btn btn-info" id="exportCsvBtn">导出CSV</button>
-                <button class="btn btn-info" id="exportJsonBtn">导出JSON</button>
-                <button class="btn btn-primary" onclick="closeModal()">关闭</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         const API_URL = 'api.php';
         let currentPage = 1;
         let totalPages = 1;
-        let currentViewingDomainId = null;
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
@@ -639,68 +563,9 @@
             }
         }
 
-        // 查看旁站列表
-        async function viewSideSites(id, domain) {
-            currentViewingDomainId = id;
-            document.getElementById('modalTitle').textContent = `${domain} 的旁站列表`;
-            document.getElementById('modalBody').innerHTML = '<div class="loading">正在加载并检测旁站IP...</div>';
-            document.getElementById('modalFooter').style.display = 'none';
-            document.getElementById('sideSiteModal').classList.add('show');
-
-            try {
-                const response = await fetch(`${API_URL}?action=side_sites&id=${id}&check_ip=1`);
-                const result = await response.json();
-
-                if (result.code === 0) {
-                    const data = result.data.data || result.data;
-                    const domainInfo = data.domain;
-                    const sites = data.sites || [];
-                    const originalIp = data.original_ip || domainInfo?.ip_address;
-
-                    if (sites.length === 0) {
-                        document.getElementById('modalBody').innerHTML = '<p>暂无旁站数据</p>';
-                        return;
-                    }
-
-                    // 统计IP匹配情况
-                    const matchCount = sites.filter(s => s.ip_match).length;
-                    const mismatchCount = sites.length - matchCount;
-
-                    let html = `
-                        <div class="info-box">
-                            <p><strong>原始IP地址：</strong> <code>${originalIp || '-'}</code></p>
-                            <p><strong>旁站总数：</strong> ${sites.length}</p>
-                            <p><strong>IP一致：</strong> <span class="text-success">${matchCount}</span> |
-                               <strong>IP不一致：</strong> <span class="text-danger">${mismatchCount}</span></p>
-                        </div>
-                    `;
-
-                    html += '<table><thead><tr><th>#</th><th>旁站域名</th><th>原始IP</th><th>当前IP</th><th>IP状态</th><th>最后解析</th></tr></thead><tbody>';
-                    sites.forEach((site, index) => {
-                        const ipMatch = site.ip_match;
-                        html += `<tr>
-                            <td>${index + 1}</td>
-                            <td><a href="http://${escapeHtml(site.side_domain)}" target="_blank">${escapeHtml(site.side_domain)}</a></td>
-                            <td class="ip-info">${site.ip_address || '-'}</td>
-                            <td class="ip-info ${ipMatch ? 'text-success' : 'text-danger'}">${site.current_ip || '-'}</td>
-                            <td>${ipMatch ? '<span class="badge badge-match">一致</span>' : '<span class="badge badge-mismatch">不一致</span>'}</td>
-                            <td>${site.last_resolved || '-'}</td>
-                        </tr>`;
-                    });
-                    html += '</tbody></table>';
-
-                    document.getElementById('modalBody').innerHTML = html;
-
-                    // 显示导出按钮
-                    document.getElementById('modalFooter').style.display = 'flex';
-                    document.getElementById('exportCsvBtn').onclick = () => exportSingle(id, 'csv');
-                    document.getElementById('exportJsonBtn').onclick = () => exportSingle(id, 'json');
-                } else {
-                    document.getElementById('modalBody').innerHTML = '<p>加载失败</p>';
-                }
-            } catch (e) {
-                document.getElementById('modalBody').innerHTML = '<p>加载失败: ' + e.message + '</p>';
-            }
+        // 查看旁站列表 - 跳转到详情页
+        function viewSideSites(id, domain) {
+            window.location.href = `detail.php?id=${id}`;
         }
 
         // 导出单个域名的旁站
@@ -799,12 +664,6 @@
             }
         }
 
-        // 关闭弹窗
-        function closeModal() {
-            document.getElementById('sideSiteModal').classList.remove('show');
-            currentViewingDomainId = null;
-        }
-
         // 状态徽章
         function getStatusBadge(status) {
             const badges = {
@@ -833,16 +692,6 @@
             div.textContent = text;
             return div.innerHTML;
         }
-
-        // 点击模态框外部关闭
-        document.getElementById('sideSiteModal').addEventListener('click', function(e) {
-            if (e.target === this) closeModal();
-        });
-
-        // ESC键关闭弹窗
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') closeModal();
-        });
     </script>
 </body>
 </html>

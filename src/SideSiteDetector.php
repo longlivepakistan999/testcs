@@ -388,11 +388,59 @@ class SideSiteDetector
     }
 
     /**
-     * 获取旁站列表并检测当前IP
+     * 获取旁站列表并检测当前IP（支持分页）
      */
-    public function getSideSitesWithIpCheck(int $domainId, bool $checkIp = true): array
+    public function getSideSitesWithIpCheck(int $domainId, bool $checkIp = true, int $page = 1, int $perPage = 100): array
     {
         // 获取域名信息
+        $stmt = $this->db->prepare('SELECT * FROM domains WHERE id = ?');
+        $stmt->execute([$domainId]);
+        $domainInfo = $stmt->fetch();
+
+        if (!$domainInfo) {
+            return ['domain' => null, 'sites' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'total_pages' => 0];
+        }
+
+        $originalIp = $domainInfo['ip_address'];
+
+        // 获取总数
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM side_sites WHERE domain_id = ?');
+        $stmt->execute([$domainId]);
+        $total = (int) $stmt->fetchColumn();
+
+        $totalPages = $total > 0 ? ceil($total / $perPage) : 0;
+        $offset = ($page - 1) * $perPage;
+
+        // 获取旁站列表（分页）
+        $stmt = $this->db->prepare('SELECT * FROM side_sites WHERE domain_id = ? ORDER BY side_domain LIMIT ? OFFSET ?');
+        $stmt->execute([$domainId, $perPage, $offset]);
+        $sites = $stmt->fetchAll();
+
+        // 如果需要检测IP
+        if ($checkIp && !empty($sites)) {
+            foreach ($sites as &$site) {
+                $currentIp = $this->resolveIP($site['side_domain']);
+                $site['current_ip'] = $currentIp;
+                $site['ip_match'] = ($currentIp === $originalIp);
+            }
+        }
+
+        return [
+            'domain' => $domainInfo,
+            'original_ip' => $originalIp,
+            'sites' => $sites,
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => $totalPages,
+        ];
+    }
+
+    /**
+     * 获取旁站列表（不分页，用于导出）
+     */
+    public function getAllSideSites(int $domainId, bool $checkIp = true): array
+    {
         $stmt = $this->db->prepare('SELECT * FROM domains WHERE id = ?');
         $stmt->execute([$domainId]);
         $domainInfo = $stmt->fetch();
@@ -403,12 +451,10 @@ class SideSiteDetector
 
         $originalIp = $domainInfo['ip_address'];
 
-        // 获取旁站列表
         $stmt = $this->db->prepare('SELECT * FROM side_sites WHERE domain_id = ? ORDER BY side_domain');
         $stmt->execute([$domainId]);
         $sites = $stmt->fetchAll();
 
-        // 如果需要检测IP
         if ($checkIp && !empty($sites)) {
             foreach ($sites as &$site) {
                 $currentIp = $this->resolveIP($site['side_domain']);
@@ -429,7 +475,7 @@ class SideSiteDetector
      */
     public function exportSingleDomain(int $domainId, string $format = 'csv'): string
     {
-        $data = $this->getSideSitesWithIpCheck($domainId, true);
+        $data = $this->getAllSideSites($domainId, true);
 
         if ($format === 'csv') {
             return $this->generateCsv($data['domain'], $data['sites']);
