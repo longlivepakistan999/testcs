@@ -23,6 +23,7 @@ $options = getopt('', [
     'limit:',      // 总处理数量限制
     'status',      // 显示当前状态
     'retry',       // 重试失败的域名
+    'refresh-ip',  // 刷新所有旁站IP
     'help',
 ]);
 
@@ -39,12 +40,14 @@ if (isset($options['help'])) {
   --limit=N      总处理数量限制 (默认: 无限制)
   --status       显示当前处理状态
   --retry        重试所有失败的域名
+  --refresh-ip   刷新所有旁站的当前IP
   --help         显示帮助信息
 
 示例:
   php process.php --batch=50 --delay=1000
   php process.php --status
   php process.php --retry
+  php process.php --refresh-ip
 
 后台运行:
   nohup php process.php --batch=100 > logs/process.log 2>&1 &
@@ -62,6 +65,12 @@ if (isset($options['status'])) {
 // 重试失败的域名
 if (isset($options['retry'])) {
     retryFailed();
+    exit(0);
+}
+
+// 刷新旁站IP
+if (isset($options['refresh-ip'])) {
+    refreshSideSitesIp($config);
     exit(0);
 }
 
@@ -306,4 +315,73 @@ function retryFailed()
     $stmt->execute(['pending', 'failed']);
 
     echo "完成! 请运行 process.php 继续处理\n";
+}
+
+/**
+ * 刷新所有旁站的当前IP
+ */
+function refreshSideSitesIp($config)
+{
+    $db = Database::getInstance();
+    $detector = new SideSiteDetector($config);
+
+    // 获取需要刷新的旁站数量
+    $stmt = $db->query('SELECT COUNT(*) FROM side_sites WHERE current_ip IS NULL OR current_ip = ""');
+    $nullCount = (int)$stmt->fetchColumn();
+
+    $stmt = $db->query('SELECT COUNT(*) FROM side_sites');
+    $totalCount = (int)$stmt->fetchColumn();
+
+    echo "============================================\n";
+    echo "        刷新旁站IP\n";
+    echo "============================================\n";
+    echo "总旁站数: {$totalCount}\n";
+    echo "需要刷新(IP为空): {$nullCount}\n";
+    echo "--------------------------------------------\n";
+
+    if ($totalCount == 0) {
+        echo "没有旁站数据\n";
+        return;
+    }
+
+    echo "开始刷新...\n\n";
+
+    $batchSize = 100;
+    $processed = 0;
+    $startTime = microtime(true);
+
+    // 分批处理
+    while (true) {
+        $result = $detector->refreshAllSideSitesIp($batchSize);
+
+        if ($result['updated'] == 0) {
+            break;
+        }
+
+        $processed += $result['updated'];
+        $elapsed = microtime(true) - $startTime;
+        $rate = $elapsed > 0 ? round($processed / $elapsed, 1) : 0;
+
+        echo sprintf(
+            "[%s] 已刷新: %d / %d (%.1f/秒)\n",
+            date('H:i:s'),
+            $processed,
+            $totalCount,
+            $rate
+        );
+
+        // 检查是否全部完成
+        if ($result['remaining'] == 0) {
+            break;
+        }
+    }
+
+    $elapsed = microtime(true) - $startTime;
+
+    echo "\n============================================\n";
+    echo "              刷新完成\n";
+    echo "============================================\n";
+    echo "已刷新: {$processed} 个旁站IP\n";
+    echo "耗时: " . formatTime($elapsed) . "\n";
+    echo "============================================\n";
 }
