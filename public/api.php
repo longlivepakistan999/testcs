@@ -171,8 +171,21 @@ try {
             }
             $format = $_GET['format'] ?? 'csv';
             $status = $_GET['status'] ?? 'completed';
+            $checkIp = ($_GET['check_ip'] ?? '0') === '1';
+            $stream = ($_GET['stream'] ?? '1') === '1'; // 默认使用流式导出
 
-            $exportData = $detector->exportAllDomains($format, $status);
+            if ($format === 'csv' && $stream) {
+                // 流式导出（适合大数据量）
+                header('Content-Type: text/csv; charset=utf-8');
+                header('Content-Disposition: attachment; filename="all_side_sites_' . date('Ymd_His') . '.csv"');
+                echo "\xEF\xBB\xBF"; // UTF-8 BOM
+                $output = fopen('php://output', 'w');
+                $detector->streamExportAllDomains($output, $status, $checkIp);
+                fclose($output);
+                exit;
+            }
+
+            $exportData = $detector->exportAllDomains($format, $status, $checkIp);
 
             if ($format === 'csv') {
                 header('Content-Type: text/csv; charset=utf-8');
@@ -182,6 +195,15 @@ try {
                 exit;
             }
             $result = $exportData;
+            break;
+
+        // 获取导出统计（预估大小）
+        case 'export_stats':
+            if ($method !== 'GET') {
+                throw new Exception('Method not allowed', 405);
+            }
+            $status = $_GET['status'] ?? 'completed';
+            $result = $detector->getExportStats($status);
             break;
 
         // 文件上传导入域名

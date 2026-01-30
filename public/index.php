@@ -353,8 +353,8 @@
                 <button class="btn btn-danger btn-sm" onclick="retryAllFailed()">重试全部失败</button>
                 <div class="export-section">
                     <button class="btn btn-info btn-sm" onclick="exportDomains('csv')">导出域名CSV</button>
-                    <button class="btn btn-warning btn-sm" onclick="exportAll('csv')">导出旁站CSV</button>
-                    <button class="btn btn-warning btn-sm" onclick="exportAll('json')">导出旁站JSON</button>
+                    <button class="btn btn-warning btn-sm" onclick="exportAll('csv', false)">快速导出旁站</button>
+                    <button class="btn btn-success btn-sm" onclick="exportAll('csv', true)">导出旁站(含IP检测)</button>
                 </div>
             </div>
 
@@ -776,9 +776,13 @@
         }
 
         // 导出所有域名的旁站
-        function exportAll(format) {
+        function exportAll(format, checkIp = false) {
             const status = document.getElementById('statusFilter').value || 'completed';
-            window.open(`${API_URL}?action=export_all&format=${format}&status=${status}`, '_blank');
+            const checkIpParam = checkIp ? '1' : '0';
+            if (checkIp) {
+                if (!confirm('带IP检测的导出会比较慢（需要DNS查询），确定继续吗？')) return;
+            }
+            window.open(`${API_URL}?action=export_all&format=${format}&status=${status}&check_ip=${checkIpParam}`, '_blank');
         }
 
         // 导出域名列表

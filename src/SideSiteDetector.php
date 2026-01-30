@@ -165,10 +165,26 @@ class SideSiteDetector
     }
 
     /**
-     * 解析域名IP
+     * 解析域名IP（带缓存，缓存1小时）
      */
-    private function resolveIP(string $domain): ?string
+    private function resolveIP(string $domain, bool $useCache = true): ?string
     {
+        // 检查缓存（1小时内的结果）
+        if ($useCache) {
+            try {
+                $stmt = $this->db->prepare(
+                    'SELECT ip_address FROM ip_cache WHERE domain = ? AND checked_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)'
+                );
+                $stmt->execute([$domain]);
+                $cached = $stmt->fetch();
+                if ($cached !== false) {
+                    return $cached['ip_address'];
+                }
+            } catch (\Exception $e) {
+                // 缓存表可能不存在，忽略错误
+            }
+        }
+
         $ip = gethostbyname($domain);
 
         // 如果返回的是原域名，说明解析失败
@@ -176,12 +192,40 @@ class SideSiteDetector
             // 尝试获取所有IP
             $ips = gethostbynamel($domain);
             if ($ips && count($ips) > 0) {
-                return $ips[0];
+                $ip = $ips[0];
+            } else {
+                $ip = null;
             }
-            return null;
+        }
+
+        // 保存到缓存
+        if ($useCache) {
+            try {
+                $stmt = $this->db->prepare(
+                    'INSERT INTO ip_cache (domain, ip_address, checked_at) VALUES (?, ?, NOW())
+                     ON DUPLICATE KEY UPDATE ip_address = VALUES(ip_address), checked_at = NOW()'
+                );
+                $stmt->execute([$domain, $ip]);
+            } catch (\Exception $e) {
+                // 忽略缓存写入错误
+            }
         }
 
         return $ip;
+    }
+
+    /**
+     * 清理过期的IP缓存（超过24小时）
+     */
+    public function cleanIpCache(): int
+    {
+        try {
+            $stmt = $this->db->prepare('DELETE FROM ip_cache WHERE checked_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)');
+            $stmt->execute();
+            return $stmt->rowCount();
+        } catch (\Exception $e) {
+            return 0;
+        }
     }
 
     /**
@@ -542,8 +586,9 @@ class SideSiteDetector
 
     /**
      * 导出所有域名的旁站数据
+     * @param bool $checkIp 是否检测当前IP（关闭可大幅提升导出速度）
      */
-    public function exportAllDomains(string $format = 'csv', string $status = 'completed'): string
+    public function exportAllDomains(string $format = 'csv', string $status = 'completed', bool $checkIp = false): string
     {
         // 获取所有符合条件的域名
         $stmt = $this->db->prepare('SELECT * FROM domains WHERE status = ? ORDER BY domain');
@@ -557,14 +602,20 @@ class SideSiteDetector
             $stmt->execute([$domain['id']]);
             $sites = $stmt->fetchAll();
 
-            // 检测每个旁站的当前IP
             foreach ($sites as &$site) {
-                $currentIp = $this->resolveIP($site['side_domain']);
-                $site['current_ip'] = $currentIp;
-                $site['ip_match'] = ($currentIp === $domain['ip_address']);
                 $site['main_domain'] = $domain['domain'];
                 $site['original_ip'] = $domain['ip_address'];
                 $site['hosting_type'] = $domain['hosting_type'];
+
+                // 仅在需要时检测IP（使用缓存）
+                if ($checkIp) {
+                    $currentIp = $this->resolveIP($site['side_domain'], true);
+                    $site['current_ip'] = $currentIp;
+                    $site['ip_match'] = ($currentIp === $domain['ip_address']);
+                } else {
+                    $site['current_ip'] = '';
+                    $site['ip_match'] = null;
+                }
             }
 
             $allData = array_merge($allData, $sites);
@@ -575,6 +626,79 @@ class SideSiteDetector
         }
 
         return json_encode(['domains' => $domains, 'sites' => $allData], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    }
+
+    /**
+     * 流式导出所有域名的旁站（直接输出，适合大数据量）
+     * @param resource $output 输出流（如 php://output）
+     */
+    public function streamExportAllDomains($output, string $status = 'completed', bool $checkIp = false): void
+    {
+        // 写入CSV表头
+        fputcsv($output, [
+            '主域名', '旁站域名', '原始IP', '当前IP', 'IP是否一致', '主机类型', '最后解析日期'
+        ]);
+
+        // 使用游标分批获取域名（避免一次加载太多）
+        $stmt = $this->db->prepare('SELECT * FROM domains WHERE status = ? ORDER BY id');
+        $stmt->execute([$status]);
+
+        while ($domain = $stmt->fetch()) {
+            $siteStmt = $this->db->prepare('SELECT * FROM side_sites WHERE domain_id = ? ORDER BY side_domain');
+            $siteStmt->execute([$domain['id']]);
+
+            while ($site = $siteStmt->fetch()) {
+                $currentIp = '';
+                $ipMatch = '';
+
+                if ($checkIp) {
+                    $currentIp = $this->resolveIP($site['side_domain'], true) ?? '';
+                    $ipMatch = ($currentIp === $domain['ip_address']) ? '是' : '否';
+                }
+
+                $hostingType = $domain['hosting_type'] === 'shared' ? '共享空间' :
+                    ($domain['hosting_type'] === 'dedicated' ? '独立服务器' : '未知');
+
+                fputcsv($output, [
+                    $domain['domain'],
+                    $site['side_domain'],
+                    $domain['ip_address'] ?? '',
+                    $currentIp,
+                    $ipMatch,
+                    $hostingType,
+                    $site['last_resolved'] ?? '',
+                ]);
+
+                // 每100条刷新一次输出
+                if (ftell($output) % 100 === 0) {
+                    flush();
+                }
+            }
+        }
+    }
+
+    /**
+     * 获取导出统计信息（用于预估导出大小）
+     */
+    public function getExportStats(string $status = 'completed'): array
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) as domain_count FROM domains WHERE status = ?');
+        $stmt->execute([$status]);
+        $domainCount = (int) $stmt->fetchColumn();
+
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) as site_count FROM side_sites ss
+             JOIN domains d ON ss.domain_id = d.id WHERE d.status = ?'
+        );
+        $stmt->execute([$status]);
+        $siteCount = (int) $stmt->fetchColumn();
+
+        return [
+            'domain_count' => $domainCount,
+            'site_count' => $siteCount,
+            'estimated_rows' => $siteCount,
+            'estimated_size_mb' => round($siteCount * 0.0002, 2), // 约200字节/行
+        ];
     }
 
     /**
