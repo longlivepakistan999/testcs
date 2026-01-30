@@ -181,6 +181,105 @@ try {
             $result = $exportData;
             break;
 
+        // 文件上传导入域名
+        case 'import':
+            if ($method !== 'POST') {
+                throw new Exception('Method not allowed', 405);
+            }
+
+            if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+                throw new Exception('文件上传失败', 400);
+            }
+
+            $file = $_FILES['file'];
+            $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+            if (!in_array($extension, ['txt', 'csv'])) {
+                throw new Exception('只支持 TXT 或 CSV 文件', 400);
+            }
+
+            $content = file_get_contents($file['tmp_name']);
+            $domains = [];
+
+            if ($extension === 'csv') {
+                $handle = fopen($file['tmp_name'], 'r');
+                $isFirstRow = true;
+                while (($row = fgetcsv($handle)) !== false) {
+                    if ($isFirstRow) {
+                        $isFirstRow = false;
+                        // 检查是否是表头
+                        if (!empty($row[0]) && !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i', trim($row[0]))) {
+                            continue;
+                        }
+                    }
+                    if (!empty($row[0])) {
+                        $domains[] = trim($row[0]);
+                    }
+                }
+                fclose($handle);
+            } else {
+                $lines = preg_split('/[\r\n]+/', $content);
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (!empty($line) && strpos($line, '#') !== 0) {
+                        $domains[] = $line;
+                    }
+                }
+            }
+
+            $domains = array_filter($domains);
+            $totalCount = count($domains);
+
+            if ($totalCount === 0) {
+                throw new Exception('文件中没有找到有效的域名', 400);
+            }
+
+            // 批量导入
+            $inserted = 0;
+            $skipped = 0;
+            $invalid = 0;
+
+            foreach ($domains as $domain) {
+                $addResult = $detector->addDomain($domain);
+                if ($addResult['success']) {
+                    $inserted++;
+                } elseif (strpos($addResult['message'] ?? '', '无效') !== false) {
+                    $invalid++;
+                } else {
+                    $skipped++;
+                }
+            }
+
+            $result = [
+                'success' => true,
+                'message' => "导入完成",
+                'total' => $totalCount,
+                'inserted' => $inserted,
+                'skipped' => $skipped,
+                'invalid' => $invalid,
+            ];
+            break;
+
+        // 导出域名列表（不含旁站）
+        case 'export_domains':
+            if ($method !== 'GET') {
+                throw new Exception('Method not allowed', 405);
+            }
+            $format = $_GET['format'] ?? 'csv';
+            $status = $_GET['status'] ?? null;
+
+            $exportData = $detector->exportDomainList($format, $status);
+
+            if ($format === 'csv') {
+                header('Content-Type: text/csv; charset=utf-8');
+                header('Content-Disposition: attachment; filename="domains_' . date('Ymd_His') . '.csv"');
+                echo "\xEF\xBB\xBF"; // UTF-8 BOM
+                echo $exportData;
+                exit;
+            }
+            $result = $exportData;
+            break;
+
         default:
             throw new Exception('Unknown action', 400);
     }

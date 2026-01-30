@@ -342,8 +342,27 @@
         <!-- 添加域名 -->
         <div class="card">
             <h2>添加域名</h2>
+
+            <!-- 文件上传 -->
             <div class="form-group">
-                <label for="domainInput">输入域名（支持批量，每行一个或用逗号分隔）</label>
+                <label>方式一：上传文件（TXT或CSV，每行一个域名）</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="file" id="fileInput" accept=".txt,.csv" style="flex: 1;">
+                    <button class="btn btn-primary" onclick="uploadFile()">上传导入</button>
+                </div>
+                <div id="uploadProgress" style="margin-top: 10px; display: none;">
+                    <div style="background: #e9ecef; border-radius: 4px; height: 20px; overflow: hidden;">
+                        <div id="progressBar" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <p id="progressText" style="margin-top: 5px; font-size: 12px; color: #666;"></p>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin: 15px 0; color: #999;">— 或者 —</div>
+
+            <!-- 手动输入 -->
+            <div class="form-group">
+                <label for="domainInput">方式二：手动输入域名（每行一个或用逗号分隔）</label>
                 <textarea id="domainInput" placeholder="example.com&#10;example.org&#10;example.net"></textarea>
             </div>
             <button class="btn btn-primary" onclick="addDomains()">添加域名</button>
@@ -363,8 +382,9 @@
                     <option value="skipped">已跳过</option>
                 </select>
                 <div class="export-section">
-                    <button class="btn btn-info btn-sm" onclick="exportAll('csv')">导出全部CSV</button>
-                    <button class="btn btn-info btn-sm" onclick="exportAll('json')">导出全部JSON</button>
+                    <button class="btn btn-info btn-sm" onclick="exportDomains('csv')">导出域名CSV</button>
+                    <button class="btn btn-warning btn-sm" onclick="exportAll('csv')">导出旁站CSV</button>
+                    <button class="btn btn-warning btn-sm" onclick="exportAll('json')">导出旁站JSON</button>
                 </div>
             </div>
             <table>
@@ -692,6 +712,91 @@
         function exportAll(format) {
             const status = document.getElementById('statusFilter').value || 'completed';
             window.open(`${API_URL}?action=export_all&format=${format}&status=${status}`, '_blank');
+        }
+
+        // 导出域名列表
+        function exportDomains(format) {
+            const status = document.getElementById('statusFilter').value || '';
+            let url = `${API_URL}?action=export_domains&format=${format}`;
+            if (status) url += `&status=${status}`;
+            window.open(url, '_blank');
+        }
+
+        // 上传文件导入域名
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('请选择文件');
+                return;
+            }
+
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (!['txt', 'csv'].includes(ext)) {
+                alert('只支持 TXT 或 CSV 文件');
+                return;
+            }
+
+            // 显示进度
+            const progressDiv = document.getElementById('uploadProgress');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            progressDiv.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressText.textContent = '正在上传...';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const xhr = new XMLHttpRequest();
+
+                xhr.upload.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 50);
+                        progressBar.style.width = percent + '%';
+                        progressText.textContent = `上传中... ${percent}%`;
+                    }
+                };
+
+                xhr.onload = function() {
+                    progressBar.style.width = '100%';
+
+                    if (xhr.status === 200) {
+                        const result = JSON.parse(xhr.responseText);
+                        if (result.code === 0) {
+                            const data = result.data;
+                            progressText.textContent = `导入完成！共 ${data.total} 个，新增 ${data.inserted} 个，跳过 ${data.skipped} 个，无效 ${data.invalid} 个`;
+                            progressBar.style.background = '#28a745';
+                            fileInput.value = '';
+                            loadStatistics();
+                            loadDomains();
+                        } else {
+                            progressText.textContent = '导入失败: ' + (result.message || '未知错误');
+                            progressBar.style.background = '#dc3545';
+                        }
+                    } else {
+                        progressText.textContent = '上传失败';
+                        progressBar.style.background = '#dc3545';
+                    }
+                };
+
+                xhr.onerror = function() {
+                    progressText.textContent = '网络错误';
+                    progressBar.style.background = '#dc3545';
+                };
+
+                xhr.open('POST', `${API_URL}?action=import`, true);
+                xhr.send(formData);
+
+                progressBar.style.width = '50%';
+                progressText.textContent = '处理中...';
+
+            } catch (e) {
+                progressText.textContent = '错误: ' + e.message;
+                progressBar.style.background = '#dc3545';
+            }
         }
 
         // 关闭弹窗

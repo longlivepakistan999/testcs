@@ -552,4 +552,64 @@ class SideSiteDetector
 
         return $csv;
     }
+
+    /**
+     * 导出域名列表（不含旁站详情）
+     */
+    public function exportDomainList(string $format = 'csv', ?string $status = null): string
+    {
+        $where = '';
+        $params = [];
+
+        if ($status) {
+            $where = 'WHERE status = ?';
+            $params[] = $status;
+        }
+
+        $stmt = $this->db->prepare("SELECT * FROM domains {$where} ORDER BY domain");
+        $stmt->execute($params);
+        $domains = $stmt->fetchAll();
+
+        if ($format === 'json') {
+            return json_encode([
+                'total' => count($domains),
+                'exported_at' => date('Y-m-d H:i:s'),
+                'data' => $domains,
+            ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        }
+
+        // CSV格式
+        $output = fopen('php://temp', 'r+');
+
+        fputcsv($output, [
+            '序号',
+            '域名',
+            'IP地址',
+            '是否Cloudflare',
+            '旁站数量',
+            '主机类型',
+            '状态',
+            '检测时间',
+        ]);
+
+        $index = 1;
+        foreach ($domains as $domain) {
+            fputcsv($output, [
+                $index++,
+                $domain['domain'],
+                $domain['ip_address'] ?? '',
+                $domain['is_cloudflare'] ? '是' : '否',
+                $domain['side_site_count'] ?? 0,
+                $domain['hosting_type'] === 'shared' ? '共享空间' : ($domain['hosting_type'] === 'dedicated' ? '独立服务器' : '未知'),
+                $domain['status'],
+                $domain['detected_at'] ?? '',
+            ]);
+        }
+
+        rewind($output);
+        $csv = stream_get_contents($output);
+        fclose($output);
+
+        return $csv;
+    }
 }
