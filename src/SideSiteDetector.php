@@ -190,35 +190,77 @@ class SideSiteDetector
      */
     private function queryViewDNS(string $host): array|false
     {
-        $apiKey = $this->config['viewdns']['api_key'];
-        $apiUrl = $this->config['viewdns']['api_url'];
+        $apiKey = $this->config['viewdns']['api_key'] ?? '';
+        $apiUrl = $this->config['viewdns']['api_url'] ?? 'https://api.viewdns.info/reverseip/';
+
+        // 检查API Key是否配置
+        if (empty($apiKey) || $apiKey === 'YOUR_API_KEY') {
+            throw new \RuntimeException('请在 config/config.php 中配置 ViewDNS API 密钥');
+        }
 
         // ViewDNS API使用host参数
         $url = sprintf('%s?host=%s&apikey=%s&output=json', $apiUrl, urlencode($host), urlencode($apiKey));
 
-        $context = stream_context_create([
-            'http' => [
-                'timeout' => 30,
-                'header' => "User-Agent: SideSiteDetector/1.0\r\nAccept: application/json",
-            ],
-            'ssl' => [
-                'verify_peer' => true,
-                'verify_peer_name' => true,
-            ],
-        ]);
+        // 优先使用cURL（更可靠）
+        if (function_exists('curl_init')) {
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_USERAGENT => 'SideSiteDetector/1.0',
+                CURLOPT_HTTPHEADER => ['Accept: application/json'],
+                CURLOPT_SSL_VERIFYPEER => true,
+            ]);
 
-        $response = @file_get_contents($url, false, $context);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
 
-        if ($response === false) {
-            return false;
+            if ($response === false || !empty($error)) {
+                throw new \RuntimeException('cURL错误: ' . $error);
+            }
+
+            if ($httpCode !== 200) {
+                throw new \RuntimeException('API返回HTTP ' . $httpCode);
+            }
+        } else {
+            // 使用file_get_contents
+            $context = stream_context_create([
+                'http' => [
+                    'timeout' => 30,
+                    'header' => "User-Agent: SideSiteDetector/1.0\r\nAccept: application/json",
+                ],
+                'ssl' => [
+                    'verify_peer' => true,
+                    'verify_peer_name' => true,
+                ],
+            ]);
+
+            $response = @file_get_contents($url, false, $context);
+
+            if ($response === false) {
+                $err = error_get_last();
+                throw new \RuntimeException('HTTP请求失败: ' . ($err['message'] ?? '未知错误'));
+            }
         }
 
         $data = json_decode($response, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \RuntimeException('JSON解析失败: ' . json_last_error_msg());
+        }
 
         if (!$data || !isset($data['response']['domains'])) {
             // 检查是否有错误信息
             if (isset($data['response']['error'])) {
                 throw new \RuntimeException('ViewDNS API错误: ' . $data['response']['error']);
+            }
+            // 可能API Key无效或其他问题
+            if (isset($data['response'])) {
+                throw new \RuntimeException('API响应无域名数据: ' . json_encode($data['response']));
             }
             return false;
         }
